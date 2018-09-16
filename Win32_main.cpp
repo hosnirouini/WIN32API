@@ -1,3 +1,5 @@
+
+
 #include<windows.h>
 #include<stdint.h>
 #include<stdio.h>
@@ -5,6 +7,8 @@
 #include<dsound.h>
 
 
+
+//TODO :: sound buffer 
 
 #define global   static
 #define internal static
@@ -44,7 +48,7 @@ struct window_dimension
 };
 
 
- 
+
 global BOOL running ;
 global back_buffer buffer;
 global LPDIRECTSOUNDBUFFER secbuffer;
@@ -77,14 +81,14 @@ typedef DIRECT_SOUND_CREATE(sound_create);
 
 
 internal void
-init_sound (HWND window,int32 size , uint32 SamplesPerSec )
+init_sound (HWND window , int32 size , uint32 SamplesPerSec )
 {
   HMODULE sound_library = LoadLibraryA("dsound.dll");
   if(sound_library)
   {
     sound_create  *DirectSound = (sound_create*)GetProcAddress(sound_library,"DirectSoundCreate");
     LPDIRECTSOUND directSound;
-    if(/*DirectSound &&*/ SUCCEEDED(DirectSound(0,&directSound,0)))
+    if(DirectSound && SUCCEEDED(DirectSound(0,&directSound,0)))
     {
        WAVEFORMATEX wave ={};
 	  wave.wFormatTag = WAVE_FORMAT_PCM ;
@@ -191,10 +195,10 @@ print_to_buffer(back_buffer *buffer,int r , int g , int b)
 	  *pixel = r | (1<<8);
 	    ++pixel;
 	  
-	    *pixel = g;
+	    *pixel = g | (1<<8);
 	    ++pixel ;
 
-	    *pixel=  b;
+	    *pixel=  b | (1<<8);
 	    ++pixel ;
 
 	    *pixel = 0;
@@ -385,14 +389,14 @@ WinMain(HINSTANCE hInstance,HINSTANCE hPrevinstance,
 {
   loadXinput();
   WNDCLASS window = {};
-  
+  ResizeDibSection(&buffer,800,1200);
   window.style          = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
   window.lpfnWndProc    = WndProc;
   window.hInstance      = hInstance;
   window.hbrBackground  = 0;
   window.lpszMenuName   = "game";
   window.lpszClassName  = "engine";
-  
+    
 
   if(!RegisterClass (&window))
   {
@@ -412,16 +416,23 @@ WinMain(HINSTANCE hInstance,HINSTANCE hPrevinstance,
       return (1);
     }
 
-    
+      
     running = true;
     MSG msg;
     int r = 0;
     int g = 0;
     int b = 0;
-    init_sound(hwindow,48000,48000*sizeof(int16)*2);
+    int index = 0;
+    HDC devicecontext = GetDC(hwindow);
+    int samplespersec = 48000;
+    int hz = 265;
+    int wavecounter = 0;
+    int waveperiod = samplespersec / hz;
+    int bytespersample = sizeof(int16)*2 ;
+    int buffersize = samplespersec * bytespersample ;
+    init_sound(hwindow,samplespersec,samplespersec*bytespersample);
     while(running)
     {
-
       print_to_buffer(&buffer,r,g,b);     
       while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
       {
@@ -492,10 +503,72 @@ WinMain(HINSTANCE hInstance,HINSTANCE hPrevinstance,
            }
 	   
         }
-
+     DWORD playcursor;
+     DWORD writecursor;
+    if(SUCCEEDED(secbuffer->GetCurrentPosition(&playcursor , &writecursor)))
+    {
+	
+      DWORD bytes = index * bytespersample % buffersize;
+      DWORD bytestowrite ;
+      if (bytes > playcursor)
+      {
+	bytestowrite = buffersize - bytes;
+	bytestowrite += playcursor ;
+	
+      }
+      else
+      {
+	bytestowrite = playcursor - bytes ; 
+      }
       
-      
-      HDC devicecontext = GetDC(hwindow);
+      //DWORD writepointer = writecursor ;
+      //DWORD bytestowrite = bytes;
+     VOID *region1;
+     DWORD sizereg1;
+     VOID *region2;
+     DWORD sizereg2;
+     VOID* deammn ;
+     if(SUCCEEDED(secbuffer->Lock(bytes ,bytestowrite ,
+				  &region1 , &sizereg1 ,
+				  &region2 , &sizereg2 ,
+				  0 )))
+     {
+       int16 *sample1 = (int16 *) region1; 
+       uint32 regionsample = sizereg1 / bytespersample ;
+       uint32 regionsample2 = sizereg2 / bytespersample ;
+       for(uint32 index = 0 ;
+	  index < regionsample;
+	  ++index)
+      {
+	if(wavecounter)
+	{
+	  wavecounter = waveperiod;
+	}
+	
+ 	int16 samplevalue = (index++/ (waveperiod/2) % 2) ? 8000 : -8000;
+	*sample1++ = samplevalue;
+	*sample1++ = samplevalue;
+	
+      }
+          
+      int16 *sample2 = (int16*)region2 ;
+      for(uint32 index2 = 0;
+	  index2 < regionsample2;
+	  ++index2)
+      {
+        
+	int16 samplevalue = (index++/ (waveperiod/2)% 2) ? 8000 : -8000;
+	*sample2++ = samplevalue;
+	*sample2++ = samplevalue;
+	
+      }
+       
+     }
+    
+         
+      secbuffer->Play(0,0,DSBPLAY_LOOPING);
+      secbuffer->Unlock(region1,sizereg1,region2,sizereg2);
+     }
       window_dimension dimension = get_window_dimension(hwindow);
       updatewindow(devicecontext ,&buffer , dimension.width, dimension.height);
       r += 1;
@@ -503,12 +576,7 @@ WinMain(HINSTANCE hInstance,HINSTANCE hPrevinstance,
       b += 3;
       
       ReleaseDC(hwindow , devicecontext);
-    }
-    /* else
-      {
-       
-	break;
-	}*/
+   }
     
   
   
@@ -521,6 +589,7 @@ WinMain(HINSTANCE hInstance,HINSTANCE hPrevinstance,
 
 int main (int argc ,char ** argv)
 {
+
   
   
   system("pause");
